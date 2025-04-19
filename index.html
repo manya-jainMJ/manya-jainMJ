@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Elderly Care Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'media',
+    };
+  </script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-6 font-sans">
+  <div class="flex justify-between items-center mb-6">
+    <h1 class="text-3xl font-bold text-center">📊 Elderly Monitoring Dashboard</h1>
+    <div id="connectionStatus" class="px-4 py-2 rounded-full bg-red-500 text-white">
+      Disconnected
+    </div>
+  </div>
+
+  <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+    <!-- Heart Rate -->
+    <div class="bg-gray-800 p-6 rounded-2xl shadow-md flex flex-col items-center">
+      <div class="text-5xl mb-2">❤️</div>
+      <h2 class="text-xl font-semibold mb-1">Heart Rate</h2>
+      <p id="heartRate" class="text-3xl text-red-400">-- BPM</p>
+      <p class="text-sm text-gray-400 mt-2">Last updated: <span id="heartRateTime">--</span></p>
+    </div>
+
+    <!-- SpO2 -->
+    <div class="bg-gray-800 p-6 rounded-2xl shadow-md flex flex-col items-center">
+      <div class="text-5xl mb-2">🩸</div>
+      <h2 class="text-xl font-semibold mb-1">SpO₂</h2>
+      <p id="spo2" class="text-3xl text-blue-400">-- %</p>
+      <p class="text-sm text-gray-400 mt-2">Last updated: <span id="spo2Time">--</span></p>
+    </div>
+
+    <!-- Fall Detection -->
+    <div class="bg-gray-800 p-6 rounded-2xl shadow-md flex flex-col items-center">
+      <div class="text-5xl mb-2">🪂</div>
+      <h2 class="text-xl font-semibold mb-1">Fall Detection</h2>
+      <p id="fall" class="text-3xl text-yellow-400">--</p>
+      <p class="text-sm text-gray-400 mt-2">Last updated: <span id="fallTime">--</span></p>
+    </div>
+
+    <!-- GPS Location -->
+    <div class="bg-gray-800 p-6 rounded-2xl shadow-md flex flex-col items-center sm:col-span-2">
+      <div class="text-5xl mb-2">📍</div>
+      <h2 class="text-xl font-semibold mb-1">GPS Location</h2>
+      <p id="gps" class="text-lg text-gray-300 text-center">--</p>
+      <p class="text-sm text-gray-400 mt-2">Last updated: <span id="gpsTime">--</span></p>
+    </div>
+
+    <!-- SOS Button -->
+    <div class="bg-gray-800 p-6 rounded-2xl shadow-md flex flex-col items-center">
+      <div class="text-5xl mb-2">🚨</div>
+      <h2 class="text-xl font-semibold mb-1">SOS Alert</h2>
+      <p id="sos" class="text-3xl text-orange-400 font-bold">--</p>
+      <p class="text-sm text-gray-400 mt-2">Last updated: <span id="sosTime">--</span></p>
+    </div>
+  </div>
+
+  <!-- MQTT Script -->
+  <script>
+    // MQTT Configuration
+    const config = {
+      brokerIP: "test.mosquitto.org",  // Public MQTT broker
+      port: 8080,  // WebSocket port for test.mosquitto.org
+      clientId: 'elderly_dashboard_' + Math.random().toString(16).substr(2, 8),
+      topics: {
+        heartRate: "home/elderly/heartRate",
+        spo2: "home/elderly/spo2",
+        fall: "home/elderly/fall",
+        gps: "home/elderly/gps",
+        emergency: "home/elderly/emergency"
+      }
+    };
+
+    // MQTT Client Setup - Using the correct WebSocket URL format for test.mosquitto.org
+    const client = mqtt.connect(`ws://${config.brokerIP}:${config.port}`, {
+      clientId: config.clientId,
+      clean: true,
+      connectTimeout: 4000,
+      reconnectPeriod: 1000,
+    });
+
+    // Connection Status Element
+    const connectionStatus = document.getElementById('connectionStatus');
+
+    // Update timestamp for a sensor
+    function updateTimestamp(sensorId) {
+      const now = new Date();
+      document.getElementById(`${sensorId}Time`).textContent = now.toLocaleTimeString();
+    }
+
+    // Update sensor value with timestamp
+    function updateSensor(topic, value, elementId) {
+      document.getElementById(elementId).textContent = value;
+      updateTimestamp(elementId);
+    }
+
+    // Connection Event Handlers
+    client.on('connect', () => {
+      console.log('✅ Connected to MQTT Broker');
+      connectionStatus.textContent = 'Connected';
+      connectionStatus.classList.remove('bg-red-500');
+      connectionStatus.classList.add('bg-green-500');
+
+      // Subscribe to all topics
+      Object.values(config.topics).forEach(topic => {
+        client.subscribe(topic, (err) => {
+          if (!err) {
+            console.log(`Subscribed to ${topic}`);
+          }
+        });
+      });
+    });
+
+    client.on('message', (topic, message) => {
+      const payload = message.toString();
+      console.log(`📩 ${topic}: ${payload}`);
+
+      switch(topic) {
+        case config.topics.heartRate:
+          updateSensor(topic, payload + ' BPM', 'heartRate');
+          break;
+        case config.topics.spo2:
+          updateSensor(topic, payload + ' %', 'spo2');
+          break;
+        case config.topics.fall:
+          updateSensor(topic, payload, 'fall');
+          break;
+        case config.topics.gps:
+          updateSensor(topic, payload, 'gps');
+          break;
+        case config.topics.emergency:
+          const sosElement = document.getElementById('sos');
+          if (payload === "SOS" || payload === "Emergency Alert: Help Needed!") {
+            sosElement.textContent = "🚨 Emergency! SOS Activated!";
+            sosElement.classList.add('text-red-500', 'font-bold');
+            
+            // Clear the SOS message after 15 seconds
+            setTimeout(() => {
+              sosElement.textContent = "--";
+              sosElement.classList.remove('text-red-500', 'font-bold');
+            }, 15000);
+          } else {
+            sosElement.textContent = payload;
+            sosElement.classList.remove('text-red-500', 'font-bold');
+          }
+          updateTimestamp('sos');
+          break;
+      }
+    });
+
+    client.on('error', (error) => {
+      console.error('MQTT Error:', error);
+      connectionStatus.textContent = 'Error';
+      connectionStatus.classList.remove('bg-green-500');
+      connectionStatus.classList.add('bg-red-500');
+    });
+
+    client.on('close', () => {
+      console.log('Connection closed');
+      connectionStatus.textContent = 'Disconnected';
+      connectionStatus.classList.remove('bg-green-500');
+      connectionStatus.classList.add('bg-red-500');
+    });
+
+    client.on('reconnect', () => {
+      console.log('Reconnecting...');
+      connectionStatus.textContent = 'Reconnecting...';
+      connectionStatus.classList.remove('bg-green-500', 'bg-red-500');
+      connectionStatus.classList.add('bg-yellow-500');
+    });
+  </script>
+</body>
+</html>
